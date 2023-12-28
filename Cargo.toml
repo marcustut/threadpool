@@ -3,8 +3,11 @@ name = "threadpool"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+dashmap = ["dep:dashmap"]
 
 [dependencies]
-thiserror = "1.0.50"
+thiserror = "1.0.52"
 tracing = "0.1.40"
+dashmap = { version = "5.5.3", optional = true }

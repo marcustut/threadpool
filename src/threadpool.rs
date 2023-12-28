@@ -1,4 +1,9 @@
-use std::{collections::HashMap, sync::Arc};
+#[cfg(feature = "dashmap")]
+use dashmap::DashMap;
+#[cfg(not(feature = "dashmap"))]
+use std::collections::HashMap;
+
+use std::sync::Arc;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {
@@ -17,25 +22,40 @@ pub enum Error {
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-pub struct ThreadPool<Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, State: Clone, Return> {
-    workers: HashMap<Id, Worker<Id, State, Return>>, // The key is the exchange's api_key
+pub struct ThreadPool<
+    State: Clone,
+    Id: std::fmt::Debug + Clone + Eq + std::hash::Hash = u64,
+    Return = (),
+> {
+    #[cfg(not(feature = "dashmap"))]
+    workers: HashMap<Id, Worker<Id, State, Return>>,
+    #[cfg(feature = "dashmap")]
+    workers: DashMap<Id, Worker<Id, State, Return>>,
     state: State,
 }
 
-impl<Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, State: Clone, Return>
-    ThreadPool<Id, State, Return>
+impl<State: Clone, Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, Return>
+    ThreadPool<State, Id, Return>
 {
     pub fn new(state: State) -> Self {
         Self {
+            #[cfg(not(feature = "dashmap"))]
             workers: HashMap::new(),
+            #[cfg(feature = "dashmap")]
+            workers: DashMap::new(),
             state,
         }
     }
 
     pub fn ids(&self) -> Vec<Id> {
-        self.workers.keys().cloned().collect()
+        #[cfg(not(feature = "dashmap"))]
+        let ids = self.workers.keys().cloned().collect();
+        #[cfg(feature = "dashmap")]
+        let ids = self.workers.iter().map(|r| r.id.clone()).collect();
+        ids
     }
 
+    #[cfg(not(feature = "dashmap"))]
     pub fn spawn(
         &mut self,
         id: Id,
@@ -56,20 +76,56 @@ impl<Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, State: Clone, Return>
         Ok(())
     }
 
+    #[cfg(feature = "dashmap")]
+    pub fn spawn(
+        &self,
+        id: Id,
+        handle: Arc<
+            dyn Fn(Id, State, std::sync::mpsc::Receiver<()>) -> std::thread::JoinHandle<Return>
+                + Send
+                + Sync,
+        >,
+    ) -> Result<()> {
+        if self.workers.contains_key(&id) {
+            return Err(Error::WorkerAlreadyExist(format!("{:?}", id)));
+        }
+
+        tracing::info!("Spawning worker {:?}...", id);
+        self.workers
+            .insert(id.clone(), Worker::new(id, self.state.clone(), handle));
+
+        Ok(())
+    }
+
+    #[cfg(not(feature = "dashmap"))]
     pub fn stop(&mut self, id: Id) -> Result<()> {
         match self.workers.remove(&id) {
             Some(worker) => worker.stop(),
             None => Err(Error::WorkerNotFound(format!("{:?}", id))),
         }
     }
+
+    #[cfg(feature = "dashmap")]
+    pub fn stop(&self, id: Id) -> Result<()> {
+        match self.workers.remove(&id) {
+            Some((_, worker)) => worker.stop(),
+            None => Err(Error::WorkerNotFound(format!("{:?}", id))),
+        }
+    }
 }
 
-impl<Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, State: Clone, Return> Drop
-    for ThreadPool<Id, State, Return>
+impl<State: Clone, Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, Return> Drop
+    for ThreadPool<State, Id, Return>
 {
     fn drop(&mut self) {
         tracing::warn!("ThreadPool is being dropped...");
+        #[cfg(not(feature = "dashmap"))]
         for (_, worker) in self.workers.drain() {
+            worker.stop().unwrap();
+        }
+        #[cfg(feature = "dashmap")]
+        for worker in &self.workers {
+            let (_, worker) = self.workers.remove(&worker.id).unwrap();
             worker.stop().unwrap();
         }
     }
