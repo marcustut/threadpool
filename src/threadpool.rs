@@ -22,11 +22,7 @@ pub enum Error {
 
 pub type Result<T> = core::result::Result<T, Error>;
 
-pub struct ThreadPool<
-    State: Clone,
-    Id: std::fmt::Debug + Clone + Eq + std::hash::Hash = u64,
-    Return = (),
-> {
+pub struct ThreadPool<Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, State: Clone, Return> {
     #[cfg(not(feature = "dashmap"))]
     workers: HashMap<Id, Worker<Id, State, Return>>,
     #[cfg(feature = "dashmap")]
@@ -34,8 +30,8 @@ pub struct ThreadPool<
     state: State,
 }
 
-impl<State: Clone, Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, Return>
-    ThreadPool<State, Id, Return>
+impl<Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, State: Clone, Return>
+    ThreadPool<Id, State, Return>
 {
     pub fn new(state: State) -> Self {
         Self {
@@ -114,8 +110,8 @@ impl<State: Clone, Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, Return>
     }
 }
 
-impl<State: Clone, Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, Return> Drop
-    for ThreadPool<State, Id, Return>
+impl<Id: std::fmt::Debug + Clone + Eq + std::hash::Hash, State: Clone, Return> Drop
+    for ThreadPool<Id, State, Return>
 {
     fn drop(&mut self) {
         tracing::warn!("ThreadPool is being dropped...");
